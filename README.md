@@ -113,7 +113,7 @@ cp .env.example .env
 Set your Gemini API key in `.env`:
 
 ```ini
-GEMINI_API_KEY="your-gemini-api-key-here"
+GEMINI_API_KEY="your-gemma-api-key-here"
 ```
 
 ### 4. Run the Application
