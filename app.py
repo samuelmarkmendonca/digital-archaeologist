@@ -19,8 +19,8 @@ import gemma_service
 import github_service
 import graph_service
 
-# Load environment variables
-load_dotenv()
+# Load environment variables with override=True to catch runtime .env changes
+load_dotenv(override=True)
 
 
 def render_cytoscape_html(elements: list[dict[str, Any]], layout_name: str = "cose") -> str:
@@ -246,8 +246,12 @@ def init_session_state() -> None:
 init_session_state()
 
 # --- Load Secrets from Environment ---
-gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-github_token = os.getenv("GITHUB_TOKEN", "").strip() or None
+raw_gemini_key = os.getenv("GEMINI_API_KEY", "")
+gemini_key = raw_gemini_key.strip().strip('"').strip("'").strip()
+
+raw_github_token = os.getenv("GITHUB_TOKEN", "")
+clean_github_token = raw_github_token.strip().strip('"').strip("'").strip()
+github_token = clean_github_token if clean_github_token else None
 
 # --- Sidebar Configuration ---
 with st.sidebar:
@@ -258,6 +262,11 @@ with st.sidebar:
         st.success("🟢 Gemma API Key Loaded (.env)")
     else:
         st.warning("⚠️ Add `GEMINI_API_KEY` to your `.env` file")
+
+    if github_token:
+        st.success("🟢 GitHub Token Active (5,000 req/hr)")
+    else:
+        st.caption("ℹ️ Unauthenticated GitHub API (60 req/hr)")
 
     st.markdown("### 💎 Gemma Track (Hackathon)")
     default_model = os.getenv("GEMMA_MODEL", "gemma-4-26b-a4b-it")
