@@ -1,154 +1,174 @@
-"""Google Gemini / Gemma AI Integration Service for Digital Archaeologist (RepoRescue).
+"""Gemma AI Archaeology Service for Digital Archaeologist.
 
-Constructs strictly grounded prompts with factual repository context, issue text,
-and verified source snippets, preventing hallucinations while generating structured
-triage guides.
+Harnesses Google's open-weights Gemma models (Gemma 4 / Gemma 3) via the Google GenAI SDK.
+Smartly combines deterministic Knowledge Graph pre-compression with Gemma's semantic reasoning
+to produce executive architectural summaries and token-optimized AI agent context payloads.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 from dotenv import load_dotenv
 
-# Load local environment variables from .env
 load_dotenv()
 
-DEFAULT_MODEL = os.getenv("GEMMA_MODEL", "gemini-2.5-flash")
+# Fixed to Gemma track models
+GEMMA_MODELS = [
+    "gemma-4-26b-a4b-it",  # Gemma 4 26B Flagship
+    "gemma-4-31b-it",      # Gemma 4 31B Dense
+    "gemma-3-27b-it",      # Gemma 3 27B Legacy
+]
+DEFAULT_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-26b-a4b-it")
 
 
-def _build_prompt(repo_info: dict[str, Any], issue: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
-    """Build a grounded prompt for the Gemini/Gemma model."""
+def _build_archaeology_prompt(
+    repo_info: dict[str, Any],
+    readme_text: str,
+    graph_data: dict[str, Any],
+) -> str:
+    """Construct a dense, pre-compressed archaeological synthesis prompt for Gemma."""
     repo_name = repo_info.get("name", "Unknown repository")
     repo_desc = repo_info.get("description") or "No description provided."
-    repo_lang = repo_info.get("language") or "Not specified"
+    repo_lang = repo_info.get("language") or "Mixed / Unspecified"
 
-    issue_title = issue.get("title", "Untitled issue")
-    issue_body = issue.get("body", "") or "No issue description provided."
-    issue_num = issue.get("number", 0)
-
-    prompt_parts = [
-        "You are an expert open-source triage companion and developer onboarding assistant.",
-        "",
-        "## Context",
-        f"- Repository: {repo_name} (Language: {repo_lang})",
-        f"- Repository Description: {repo_desc}",
-        f"- Issue #{issue_num}: {issue_title}",
-        "",
-        "### Issue Description:",
-        "```markdown",
-        issue_body[:4000],  # Bound issue body to protect context
-        "```",
-        "",
-        "## Candidate Source Files",
-        "The following files were selected by a deterministic keyword-ranking engine based on the issue description.",
-        "Inspect ONLY the supplied paths and code snippets below:",
-        "",
+    # Pre-compressed knowledge graph representation designed specifically for Gemma
+    condensed_nodes = [
+        {
+            "file": n["path"],
+            "type": n["type"],
+            "language": n["language"],
+            "exports": n["exports"],
+            "imports": n["imports"],
+        }
+        for n in graph_data.get("nodes", [])[:35]
     ]
 
-    for idx, candidate in enumerate(candidates, start=1):
-        path = candidate.get("path", "unknown")
-        reason = candidate.get("reason", "N/A")
-        snippet = candidate.get("snippet", "[No snippet available]")
+    condensed_edges = graph_data.get("edges", [])[:40]
 
-        prompt_parts.extend([
-            f"### Candidate {idx}: `{path}`",
-            f"- **Ranking Rationale**: {reason}",
-            "- **Code Snippet**:",
-            "```",
-            snippet,
-            "```",
-            "",
-        ])
-
-    prompt_parts.extend([
-        "## Instructions",
-        "Generate a structured, evidence-grounded markdown response following EXACTLY these 5 sections:",
+    prompt_parts = [
+        "You are an expert codebase archaeologist and software systems architect powered by Gemma.",
         "",
-        "### 1. Plain-English Issue Summary",
-        "Summarize the problem in 1–2 clear sentences for a newcomer.",
+        "## Context & Mission",
+        "A developer or team has returned to a long-abandoned or inherited project.",
+        "Instead of reading raw source files, you are provided with a pre-computed Codebase Knowledge Graph.",
+        "Analyze the repository structure, entry points, and dependency topology to produce an architectural resurrection report.",
         "",
-        "### 2. Code Observations",
-        "State what the supplied code snippets actually show (factual observations only, e.g. functions, classes, imports, configs).",
+        "## Repository Overview",
+        f"- Repository: {repo_name}",
+        f"- Description: {repo_desc}",
+        f"- Primary Language: {repo_lang}",
+        f"- Default Branch: {repo_info.get('default_branch', 'main')}",
         "",
-        "### 3. Relevance to Issue",
-        "Explain why each candidate file may be involved in or affected by the reported problem.",
+        "## README Artifact (Excerpt):",
+        "```markdown",
+        (readme_text[:2500] if readme_text else "No README file found in repository."),
+        "```",
         "",
-        "### 4. Concrete Next Investigation Steps",
-        "Provide 3 to 5 actionable steps the developer should take next (e.g. specific tests to run, functions to inspect, logs or breakpoints to set).",
+        "## Codebase Knowledge Graph Topology:",
+        "```json",
+        json.dumps({"nodes": condensed_nodes, "edges": condensed_edges}, indent=2),
+        "```",
         "",
-        "### 5. What Cannot Be Determined",
-        "List what cannot be confirmed or diagnosed from the supplied snippets alone without running the code or examining other files.",
+        "## Report Guidelines",
+        "Produce a structured Markdown report with EXACTLY these 5 sections:",
         "",
-        "## Strict Grounding Rules:",
-        "- ONLY reference the files, symbols, and snippets supplied above.",
-        "- DO NOT invent non-existent file names, imaginary line numbers, or test results.",
-        "- DO NOT claim the bug is confirmed, solved, or diagnosed.",
-        "- Maintain a clear distinction between verified code facts and working hypotheses.",
-    ])
+        "### 1. 🏛️ Executive Codebase Summary",
+        "In 2 paragraphs, explain what this project actually does, its core purpose, and target domain.",
+        "",
+        "### 2. 🧩 Architectural Topology & Module Breakdown",
+        "Explain how the major components and files identified in the Knowledge Graph connect and divide responsibilities.",
+        "",
+        "### 3. 🚀 Entry Points & Execution Lifecycle",
+        "Identify the primary entry points (e.g. main/app scripts, APIs, CLIs, or UI components) and trace the execution path.",
+        "",
+        "### 4. 🧭 Project Resurrection Guide",
+        "Give actionable advice for a developer dusting off this abandoned code: dependencies to check, key files to inspect first, and likely areas of tech debt.",
+        "",
+        "### 5. 🤖 Token-Efficient AI Agent Context Prompt",
+        "Provide a compact, copy-pasteable context block (inside a markdown fence) that can be passed to external AI coding agents so they understand the whole architecture without reading raw files.",
+        "",
+        "## Grounding Rules:",
+        "- Rely strictly on the supplied Knowledge Graph nodes, edges, and README.",
+        "- Do not hallucinate non-existent modules or classes.",
+    ]
 
     return "\n".join(prompt_parts)
 
 
-def analyze_issue_with_gemma(
+def generate_archaeology_summary(
     repo_info: dict[str, Any],
-    issue: dict[str, Any],
-    candidates: list[dict[str, Any]],
+    readme_text: str,
+    graph_data: dict[str, Any],
     api_key: str | None = None,
     model: str | None = None,
 ) -> str:
-    """Send structured prompt to Gemini / Gemma with factual repository context,
-
-    issue text, and actual file snippets. Returns grounded Markdown analysis.
-
-    Falls back cleanly with an informative message if the API key is missing
-    or network/quota errors occur.
-    """
+    """Execute Gemma archaeological synthesis with smart fallback across Gemma models."""
     key = api_key or os.getenv("GEMINI_API_KEY")
     if not key or key.strip() == "" or "your_" in key.lower():
         return (
-            "> ⚠️ **Gemini API Key Required for AI Analysis**\n\n"
-            "To view the AI-generated Code Trail synthesis and action checklist, set your `GEMINI_API_KEY` "
-            "in your `.env` file or enter it in the app sidebar.\n\n"
-            "The deterministic candidate files and snippets above are completely functional without an API key!"
+            "> ⚠️ **Gemini API Key Required for Gemma Synthesis**\n\n"
+            "To view the Gemma-generated Codebase Resurrection Guide and AI agent context prompt, "
+            "set your `GEMINI_API_KEY` in your `.env` file or enter it in the app sidebar.\n\n"
+            "The **Knowledge Graph**, **dependency topology**, and **token reduction metrics** "
+            "are completely functional without an API key!"
         )
 
-    model_name = model or os.getenv("GEMMA_MODEL") or DEFAULT_MODEL
+    primary_model = model or os.getenv("GEMMA_MODEL") or DEFAULT_MODEL
 
     try:
         from google import genai
+        from google.genai import types
     except ImportError:
         return (
             "> ⚠️ **`google-genai` SDK Not Installed**\n\n"
-            "Run `.venv\\Scripts\\pip install google-genai` to enable AI analysis."
+            "Run `.venv\\Scripts\\pip install google-genai` to enable Gemma analysis."
         )
 
-    prompt = _build_prompt(repo_info, issue, candidates)
+    prompt = _build_archaeology_prompt(repo_info, readme_text, graph_data)
 
-    try:
-        client = genai.Client(api_key=key.strip())
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-        )
-        if response and response.text:
-            return response.text
-        return "> ⚠️ Gemini returned an empty response. Please retry in a moment."
-    except Exception as e:
-        err_msg = str(e)
-        if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
-            return (
-                "> ⏳ **API Rate Limit Reached (429)**\n\n"
-                "The Gemini API quota was temporarily exceeded. Please wait a minute and re-run your investigation."
+    # Smart Gemma Harnessing: Low temperature for grounded architectural analysis
+    gen_config = types.GenerateContentConfig(
+        temperature=0.2,
+        top_p=0.9,
+    )
+
+    client = genai.Client(api_key=key.strip())
+
+    # Candidate sequence of Gemma models for resilient fallback
+    models_to_try = [primary_model] + [m for m in GEMMA_MODELS if m != primary_model]
+
+    last_error = ""
+    for candidate_model in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=candidate_model,
+                contents=prompt,
+                config=gen_config,
             )
-        if "API_KEY_INVALID" in err_msg or "400" in err_msg and "key" in err_msg.lower():
-            return (
-                "> ❌ **Invalid Gemini API Key**\n\n"
-                "The provided `GEMINI_API_KEY` is not valid. Verify your key at https://aistudio.google.com/."
-            )
+            if response and response.text:
+                prefix = f"> 🧠 *Synthesized by **{candidate_model}***\n\n" if candidate_model != primary_model else ""
+                return prefix + response.text
+        except Exception as e:
+            last_error = str(e)
+            # If 429 quota or 404 model not found, attempt next Gemma model in sequence
+            continue
+
+    # If all Gemma attempts failed, provide descriptive notice
+    if "RESOURCE_EXHAUSTED" in last_error or "429" in last_error:
         return (
-            f"> ⚠️ **AI Analysis Unavailable**: Encountered an error while contacting the model ({model_name}):\n\n"
-            f"```text\n{err_msg}\n```\n\n"
-            "You can still inspect the ranked candidate files and code snippets directly above."
+            "> ⏳ **Gemma API Rate Limit Reached (429)**\n\n"
+            "The Gemma API quota was temporarily reached. Please wait a moment and re-excavate."
         )
+    if "API_KEY_INVALID" in last_error or "400" in last_error and "key" in last_error.lower():
+        return (
+            "> ❌ **Invalid API Key**\n\n"
+            "The provided `GEMINI_API_KEY` is not valid. Verify your key at https://aistudio.google.com/."
+        )
+    return (
+        f"> ⚠️ **Gemma Synthesis Unavailable**: Encountered error across Gemma models:\n\n"
+        f"```text\n{last_error}\n```\n\n"
+        "You can still inspect the interactive Knowledge Graph and token economics below."
+    )

@@ -241,3 +241,70 @@ def get_file_text(
     if len(text) > max_chars:
         return text[:max_chars] + f"\n\n... [Truncated: content exceeded {max_chars} characters]"
     return text
+
+
+def get_readme(owner: str, repo: str, default_branch: str = "main", token: str | None = None) -> str:
+    """Fetch repository README content if available."""
+    headers = _get_headers(token)
+    endpoint = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/readme?ref={default_branch}"
+    try:
+        resp = requests.get(endpoint, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+        if resp.status_code == 200:
+            data = resp.json()
+            raw_b64 = data.get("content", "")
+            if raw_b64:
+                return base64.b64decode(raw_b64).decode("utf-8", errors="replace")[:8000]
+    except Exception:
+        pass
+    return ""
+
+
+def get_key_source_files(
+    owner: str,
+    repo: str,
+    tree_entries: list[dict[str, Any]],
+    default_branch: str = "main",
+    max_files: int = 15,
+    token: str | None = None,
+) -> dict[str, str]:
+    """Fetch the contents of the most important entry points, manifests, and core files.
+
+    Prioritizes entry points (app.py, main.py, index.js) and config files (package.json, pyproject.toml).
+    """
+    priority_names = {
+        "readme.md", "package.json", "requirements.txt", "pyproject.toml",
+        "cargo.toml", "go.mod", "dockerfile", "main.py", "app.py", "index.py",
+        "index.js", "index.ts", "server.js", "server.ts", "app.js", "app.ts",
+    }
+
+    selected_paths: list[str] = []
+    
+    # 1. Select priority files
+    for entry in tree_entries:
+        path = entry.get("path", "")
+        filename = path.split("/")[-1].lower()
+        if filename in priority_names and path not in selected_paths:
+            selected_paths.append(path)
+            if len(selected_paths) >= max_files:
+                break
+
+    # 2. Select top source files if limit not reached
+    if len(selected_paths) < max_files:
+        for entry in tree_entries:
+            path = entry.get("path", "")
+            if path in selected_paths:
+                continue
+            ext = os.path.splitext(path)[1].lower()
+            if ext in (".py", ".js", ".ts", ".go", ".rs", ".java") and not any(x in path for x in ("test", "dist", "vendor", "node_modules")):
+                selected_paths.append(path)
+                if len(selected_paths) >= max_files:
+                    break
+
+    # Fetch contents
+    contents: dict[str, str] = {}
+    for path in selected_paths:
+        text = get_file_text(owner, repo, path, default_branch, token=token, max_chars=4000)
+        contents[path] = text
+
+    return contents
+

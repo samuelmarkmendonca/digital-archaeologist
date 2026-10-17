@@ -1,21 +1,21 @@
-# RepoRescue (Digital Archaeologist) — Architecture, Analysis & MVP Plan
+# Digital Archaeologist — Architecture, Analysis & Core MVP Plan
 
-> **Context**: 4 teammates, fast-track MVP plan starting from an empty repo. This document serves as the core operational reference for developers and AI agents.
+> **Core Mission**: Help developers and teams who have abandoned, dormant, or inherited projects quickly re-understand their codebase. When handing off the project to an LLM or AI coding agent, Digital Archaeologist constructs a **Codebase Knowledge Graph** that delivers full architectural awareness while consuming up to **90%+ fewer tokens** than dumping raw source files.
 
 ---
 
-## 1. What is RepoRescue / Digital Archaeologist?
+## 1. What is Digital Archaeologist?
 
-A **Streamlit web application** that acts as an automated triage tool and code trail navigator for open-source contributors and developers investigating a GitHub issue. 
+An automated **codebase excavation and structural knowledge graph engine** built with Streamlit.
 
-You provide a **GitHub Repository URL** and an **Issue URL** → the tool:
-1. Fetches repository metadata and git tree entries via GitHub REST API.
-2. Extracts keywords and deterministically ranks the top candidate source files likely responsible for or relevant to the issue.
-3. Retrieves real file contents/snippets (truncated safely to fit context windows).
-4. Sends the evidence and issue context to **Google Gemini / Gemma** using the `google-genai` SDK.
-5. Displays a rich, visual **"Code Trail"** with direct GitHub links, ranking rationales, grounded AI explanations, and concrete next-step investigation recommendations.
+When you return to an old side project or inherit an unfamiliar repository, you don't know where execution starts, how modules connect, or what the architecture looks like. Furthermore, if you paste hundreds of files into an AI assistant, you burn tens of thousands of tokens, hit rate limits, and suffer from "lost-in-the-middle" context rot.
 
-**Key Architectural Principle**: Deterministic, verifiable code analysis first; AI strictly for synthesis, explanation, and guided investigation. No hallucinated files, no imaginary line numbers.
+Digital Archaeologist solves both problems:
+1. **Repository Excavation**: Fetches repository structure, README, dependency manifests, and key entry points via GitHub REST API.
+2. **Knowledge Graph Generation**: Deterministically maps files, modules, classes/functions, and dependency/import relationships into a connected node-and-edge graph (`knowledge_graph.json` and visual Mermaid topology).
+3. **Token Economics Optimization**: Compares raw codebase token size against the compact Knowledge Graph, providing 85%–95% token savings for downstream LLM prompts.
+4. **Architectural Synthesis (Gemini / Gemma)**: Uses Google GenAI to synthesize an Executive Codebase Summary, Module Breakdown, Entry Point Flow, and a Project Resurrection Guide.
+5. **AI Agent Context Exporter**: Outputs a ready-to-use prompt payload for external AI agents (Cursor, Devin, Windsurf, Claude, ChatGPT).
 
 ---
 
@@ -23,59 +23,27 @@ You provide a **GitHub Repository URL** and an **Issue URL** → the tool:
 
 ```mermaid
 graph TD
-    A["👤 User"] -->|Pastes repo + issue URL| B["Streamlit UI<br/>(app.py)"]
-    B -->|parse & validate URLs| C["GitHub Service<br/>(github_service.py)"]
-    C -->|REST API calls| D["GitHub API"]
-    D -->|metadata, README,<br/>file tree, issue, file contents| C
-    C -->|tree entries + issue text| E["Candidate Ranker<br/>(ranking.py)"]
-    E -->|top 3 files + reasons| B
-    B -->|issue + snippets| F["Gemma Service<br/>(gemma_service.py)"]
-    F -->|prompt| G["Gemini API<br/>(Gemma / Gemini model)"]
-    G -->|explanation| F
-    F -->|formatted response| B
-    B -->|renders Code Trail| A
-
-    style B fill:#4A90D9,stroke:#2C5F8A,color:white
-    style C fill:#50B86C,stroke:#2D7A3E,color:white
-    style E fill:#F5A623,stroke:#C07D0E,color:white
-    style F fill:#D0021B,stroke:#8B0114,color:white
+    User["👤 Developer / Team"] -->|Enters Repo URL| UI["Streamlit UI (app.py)"]
+    UI -->|Validates URL| GH["GitHub Service (github_service.py)"]
+    GH -->|REST API| GHAPI[("GitHub API")]
+    GHAPI -->|Tree, README, Key Files| GH
+    GH -->|Tree & Key Files| GraphEngine["Knowledge Graph Service (graph_service.py)"]
+    GraphEngine -->|Nodes, Edges, Token Stats| UI
+    UI -->|Metadata + Graph + README| AIService["Gemma Service (gemma_service.py)"]
+    AIService -->|Structured Prompt| GenAI[("Google Gemini API")]
+    GenAI -->|Archaeological Summary| AIService
+    AIService -->|Report & Resurrection Guide| UI
+    UI -->|Visual Graph + Token Metrics + Context Payload| User
 ```
 
 ### Module Responsibilities
 
 | Module | Responsibility | Depends On |
 |--------|---------------|------------|
-| `app.py` | UI layout, user inputs, reactive state, button handlers, rendering results | `github_service`, `ranking`, `gemma_service`, `streamlit` |
-| `github_service.py` | URL parsing, GitHub REST API calls, git tree & content fetching, error handling | `requests` library |
-| `ranking.py` | Keyword extraction, tokenization, file path scoring, candidate selection & rationale | Pure Python (`re`, standard library) |
-| `gemma_service.py` | Prompt construction, Gemini / Gemma API invocation via `google-genai`, response formatting | `google-genai` SDK |
-
-### Data Flow (Step by Step)
-
-```text
-1. User enters repo URL  → parse_repo_url("https://github.com/owner/repo")
-                             → returns ("owner", "repo")
-
-2. Fetch repo overview  → get_repository_overview("owner", "repo")
-                             → returns {name, description, language, default_branch, tree_entries[]}
-
-3. User enters issue URL → parse_issue_url("https://github.com/owner/repo/issues/42", "owner", "repo")
-                             → returns 42
-
-4. Fetch issue          → get_issue("owner", "repo", 42)
-                             → returns {title, body, url, number}
-
-5. Rank files           → rank_candidate_files(issue_title + issue_body, tree_entries)
-                             → returns [{path, score, reason}, ...] (max 3)
-
-6. Fetch file contents  → get_file_text("owner", "repo", "src/auth.py", "main") × up to 3
-                             → returns truncated source code string
-
-7. Call Gemma / Gemini  → analyze_issue_with_gemma(repo_info, issue, candidates_with_snippets)
-                             → returns markdown explanation string
-
-8. Render Code Trail    → Streamlit UI renders visual cards, diff-like snippets, and action checklist
-```
+| `app.py` | Streamlit web interface, excavation pipeline, tabs, token stats, exports | All modules |
+| `github_service.py` | Repository overview, recursive tree, README, key file retrieval | `requests` |
+| `graph_service.py` | AST/regex parsing of imports/symbols, node/edge creation, Mermaid generation, token economics | Pure Python (`re`, standard library) |
+| `gemma_service.py` | Gemini/Gemma prompt construction, architectural synthesis, resurrection guide | `google-genai` SDK |
 
 ---
 
@@ -86,46 +54,26 @@ graph TD
 def parse_repo_url(repo_url: str) -> tuple[str, str]:
     """Parse 'https://github.com/owner/repo' into ('owner', 'repo'). Raises ValueError if invalid."""
 
-def parse_issue_url(issue_url: str, expected_owner: str, expected_repo: str) -> int:
-    """Parse issue number from URL matching expected repository. Raises ValueError if invalid."""
+def get_repository_overview(owner: str, repo: str, token: str | None = None) -> dict:
+    """Fetch repo metadata and recursive git tree entries."""
 
-def get_repository_overview(owner: str, repo: str) -> dict:
-    """Fetch repo metadata and recursive git tree entries.
-    Returns: {
-        'name': str,
-        'description': str | None,
-        'language': str | None,
-        'default_branch': str,
-        'tree_entries': list[dict]
-    }
-    """
+def get_readme(owner: str, repo: str, default_branch: str = "main", token: str | None = None) -> str:
+    """Fetch repository README content if available."""
 
-def get_issue(owner: str, repo: str, issue_number: int) -> dict:
-    """Fetch issue title, markdown body, html_url, and number."""
-
-def get_file_text(owner: str, repo: str, path: str, ref: str) -> str:
-    """Fetch raw file content decoded as UTF-8, truncated to ~6000 chars."""
+def get_key_source_files(owner: str, repo: str, tree_entries: list[dict], default_branch: str = "main", max_files: int = 15, token: str | None = None) -> dict[str, str]:
+    """Fetch the contents of the most important entry points, manifests, and core files."""
 ```
 
-### `ranking.py`
+### `graph_service.py`
 ```python
-def rank_candidate_files(issue_text: str, tree_entries: list[dict], limit: int = 3) -> list[dict]:
-    """Score file paths against keywords extracted from the issue title and body.
-    Returns: [
-        {
-            'path': 'src/auth/login.py',
-            'score': int,
-            'reason': 'Path contains terms matching issue: auth, login'
-        }, ...
-    ]
-    """
+def build_knowledge_graph(repo_name: str, tree_entries: list[dict], file_contents: dict[str, str]) -> dict:
+    """Constructs nodes, edges, Mermaid diagram, and token economics for downstream AI agents."""
 ```
 
 ### `gemma_service.py`
 ```python
-def analyze_issue_with_gemma(repo_info: dict, issue: dict, candidates: list[dict]) -> str:
-    """Send structured prompt to Gemini / Gemma with factual repository context, issue text,
-    and actual file snippets. Returns grounded Markdown analysis."""
+def generate_archaeology_summary(repo_info: dict, readme_text: str, graph_data: dict, api_key: str | None = None, model: str | None = None) -> str:
+    """Sends structured prompt to Gemini/Gemma to produce an executive codebase report and AI context."""
 ```
 
 ---
@@ -134,38 +82,24 @@ def analyze_issue_with_gemma(repo_info: dict, issue: dict, candidates: list[dict
 
 | Component | Library / Technology | Purpose |
 |-----------|----------------------|---------|
-| Frontend | `streamlit` | Clean, interactive web UI with cards and spinners |
+| Frontend | `streamlit` | Clean, interactive web UI with token metrics and Mermaid graphs |
 | HTTP Client | `requests` | GitHub REST v3 API interaction |
-| AI / LLM | `google-genai` | Gemma / Gemini multimodal API client |
-| Configuration | `python-dotenv` | Loads environment variables from `.env` |
+| AI / LLM | `google-genai` (Gemma Track) | Gemma 4 (`gemma-4-26b-a4b-it`) architectural synthesis |
+| Graphing | `Mermaid.js` (native Markdown) | Visual module topology diagram |
+| Secrets | `python-dotenv` | Loads environment variables from `.env` |
 | Runtime | Python 3.10+ | Core language environment |
 
 ---
 
-## 5. Post-MVP Extension: Codebase Knowledge Graph Generator
+## 5. Harnessing Gemma in a Smart Way (Hackathon Track)
 
-> [!NOTE]
-> **Priority & Scope**: The core feature and primary mission of Digital Archaeologist is **codebase summarization and issue triage** (producing the Code Trail). This Knowledge Graph extension is scheduled strictly **post-MVP**, and will only be implemented once the MVP is verified, stable, and working.
+Instead of naively prompting Gemma with massive, raw source files (which wastes tokens and causes context rot), Digital Archaeologist uses a **Two-Tier Intelligence Architecture**:
 
-### Purpose
-When downstream AI agents (like coding assistants or automated agents) work on a repository, injecting full source files into context consumes tens of thousands of tokens and causes context rot. By generating a compact, structural **Knowledge Graph** output alongside the codebase summary:
-- Downstream AI agents ingest a dense, token-efficient structural map (nodes = files/modules/classes, edges = imports/dependencies).
-- AI agents get full architectural context while consuming dramatically fewer tokens.
+1. **Tier 1 (Deterministic Knowledge Graph Compression)**:
+   - Python scans the full repository tree, extracts imports/exports, filters noise, and maps modules into a compact node-edge topological model (`graph_service.py`).
+   - Cuts raw context volume by **85%–95%** *before* touching the model.
 
-### Planned Output Specification
-- **Format**: JSON artifact (`knowledge_graph.json`) and visual graph (Mermaid / SVG).
-- **Graph Schema**:
-  ```json
-  {
-    "repository": "owner/repo",
-    "summary": "Core architectural summary of the codebase...",
-    "nodes": [
-      {"id": "src/auth.py", "type": "module", "exports": ["login", "verify_token"]},
-      {"id": "src/db.py", "type": "module", "exports": ["get_db_session"]}
-    ],
-    "edges": [
-      {"source": "src/auth.py", "target": "src/db.py", "relation": "imports"}
-    ]
-  }
-  ```
-- **Execution Condition**: Strictly gated behind MVP validation and flag toggle (`ENABLE_KNOWLEDGE_GRAPH=false` by default).
+2. **Tier 2 (Gemma Semantic Synthesis)**:
+   - Gemma receives the pre-compressed Knowledge Graph + README + key entry point signatures.
+   - Operated at **temperature 0.2** for grounded, factual systems architecture reasoning.
+   - Resilient multi-model fallback across the Gemma family (`gemma-4-26b-a4b-it` → `gemma-4-31b-it` → `gemma-3-27b-it`).

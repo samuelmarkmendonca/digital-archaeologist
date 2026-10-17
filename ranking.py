@@ -38,8 +38,9 @@ STOPWORDS = {
 
 # Ignored binary, media, lock, and compiled file extensions
 IGNORED_EXTENSIONS = {
-    # Images & Media
+    # Images & Media & Design files
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp", ".mp4", ".mp3",
+    ".ai", ".psd", ".sketch", ".fig",
     # Fonts
     ".woff", ".woff2", ".ttf", ".eot", ".otf",
     # Data & Archives
@@ -49,6 +50,14 @@ IGNORED_EXTENSIONS = {
     ".o", ".obj", ".bin",
     # Minified assets & maps
     ".min.js", ".min.css", ".map",
+    # Marker files & static txt
+    ".typed",
+}
+
+# Recognized source code file extensions to prioritize
+SOURCE_EXTENSIONS = {
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".c", ".cpp",
+    ".h", ".hpp", ".cs", ".rb", ".php", ".swift", ".kt", ".scala", ".sh",
 }
 
 
@@ -93,6 +102,11 @@ def _is_candidate_file(path: str) -> bool:
     for seg in segments:
         if seg.startswith(".") and seg not in (".", ".."):
             return False
+
+    # Ignore marker / typestub files
+    base = os.path.basename(lower_path)
+    if base in ("py.typed", ".gitkeep", ".keep", ".gitignore"):
+        return False
 
     # Ignore docs and vendor/node_modules directories
     if any(x in segments for x in ("vendor", "node_modules", "dist", "build", "site-packages", "docs")):
@@ -163,9 +177,14 @@ def rank_candidate_files(
             score += 10
             matched_terms.add(filename_no_ext.lower())
 
+        # Prioritize recognized source code files over generic text files
+        if ext.lower() in SOURCE_EXTENSIONS and score > 0:
+            score += 6
+
         # Penalize test files slightly so implementation files rank higher
         if "test" in path.lower() or "tests" in path.lower():
             score = max(1, int(score * 0.7))
+
 
         if score > 0:
             term_list = sorted(list(matched_terms))[:4]
