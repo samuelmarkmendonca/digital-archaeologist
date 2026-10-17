@@ -7,6 +7,7 @@ issue fetching, and raw file content retrieval via the GitHub REST API v3.
 from __future__ import annotations
 
 import base64
+import os
 import re
 import urllib.parse
 from typing import Any

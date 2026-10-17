@@ -123,7 +123,10 @@ def build_knowledge_graph(
     edges: list[dict[str, Any]] = []
     node_id_map: dict[str, str] = {}
 
-    total_raw_chars = 0
+    # Map file paths to exact byte sizes provided by GitHub's Git Tree API
+    file_sizes = {e["path"]: e.get("size", 0) for e in tree_entries if e.get("type") == "blob"}
+
+    total_raw_bytes = 0
 
     for path in relevant_files:
         filename = os.path.basename(path)
@@ -132,7 +135,9 @@ def build_knowledge_graph(
         is_entry = filename in ENTRY_POINT_NAMES or path.lower() in ("main.py", "app.py", "src/index.js")
         
         content = file_contents.get(path, "")
-        total_raw_chars += len(content) if content else 1500  # Estimate if not fetched
+        # Use exact GitHub blob byte size if available, fallback to content length
+        file_bytes = file_sizes.get(path, 0)
+        total_raw_bytes += file_bytes if file_bytes > 0 else (len(content) if content else 1500)
 
         imports, symbols = parse_imports_and_symbols(content, ext)
 
@@ -147,6 +152,7 @@ def build_knowledge_graph(
             "language": language,
             "exports": symbols,
             "imports": imports,
+            "size_bytes": file_bytes,
         }
         nodes.append(node)
         node_id_map[filename.split(".")[0].lower()] = node_id
@@ -170,7 +176,6 @@ def build_knowledge_graph(
 
     # Generate visual Mermaid graph representation
     mermaid_lines = ["graph TD"]
-    # Limit nodes shown in visual diagram to top 25 to keep diagram clean and fast
     display_nodes = nodes[:25]
     display_ids = {n["id"] for n in display_nodes}
 
@@ -191,12 +196,15 @@ def build_knowledge_graph(
 
     mermaid_diagram = "\n".join(mermaid_lines)
 
-    # Estimate token economics: ~4 characters per token
-    raw_tokens_estimate = max(1000, total_raw_chars // 4)
-    # The JSON Knowledge graph is compact (typically 1,500 - 3,500 tokens)
-    graph_chars = len(str(nodes)) + len(str(edges))
+    # Standard LLM BPE tokenization metric (~4 bytes/chars per token in code)
+    raw_tokens_estimate = max(1000, total_raw_bytes // 4)
+    # The Knowledge Graph is serialized into dense JSON
+    graph_chars = len(json.dumps(nodes)) + len(json.dumps(edges))
     graph_tokens_estimate = max(400, graph_chars // 4)
     savings_pct = max(0.0, round((1.0 - (graph_tokens_estimate / raw_tokens_estimate)) * 100, 1))
+
+    # Format Cytoscape.js elements
+    cytoscape_elements = generate_cytoscape_elements(nodes, edges)
 
     return {
         "repository": repo_name,
@@ -208,9 +216,48 @@ def build_knowledge_graph(
         "nodes": nodes,
         "edges": edges,
         "mermaid_diagram": mermaid_diagram,
+        "cytoscape_elements": cytoscape_elements,
         "token_stats": {
+            "raw_codebase_bytes": total_raw_bytes,
             "raw_codebase_tokens": raw_tokens_estimate,
             "knowledge_graph_tokens": graph_tokens_estimate,
             "token_reduction_percent": f"{savings_pct}%",
+            "methodology": "Based on GitHub Git Tree blob byte sizes and BPE tokenization (~4 bytes/chars per token).",
         },
     }
+
+
+def generate_cytoscape_elements(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], max_nodes: int = 40) -> list[dict[str, Any]]:
+    """Format nodes and edges into the Cytoscape.js data schema for interactive visualization."""
+    elements: list[dict[str, Any]] = []
+
+    # Prioritize entrypoints first, up to max_nodes to keep visualization smooth
+    selected_nodes = sorted(nodes, key=lambda n: (0 if n["type"] == "entrypoint" else 1))[:max_nodes]
+    selected_ids = {n["id"] for n in selected_nodes}
+
+    for n in selected_nodes:
+        elements.append({
+            "data": {
+                "id": n["id"],
+                "label": n["filename"],
+                "path": n["path"],
+                "type": n["type"],
+                "language": n["language"],
+                "exports": ", ".join(n["exports"][:4]) if n["exports"] else "None",
+                "imports": ", ".join(n["imports"][:4]) if n["imports"] else "None",
+            }
+        })
+
+    for e in edges:
+        if e["source"] in selected_ids and e["target"] in selected_ids:
+            elements.append({
+                "data": {
+                    "id": f"{e['source']}->{e['target']}",
+                    "source": e["source"],
+                    "target": e["target"],
+                    "relation": e.get("relation", "imports"),
+                }
+            })
+
+    return elements
+

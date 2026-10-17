@@ -12,6 +12,7 @@ import os
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 import gemma_service
@@ -20,6 +21,170 @@ import graph_service
 
 # Load environment variables
 load_dotenv()
+
+
+def render_cytoscape_html(elements: list[dict[str, Any]], layout_name: str = "cose") -> str:
+    """Generate standalone HTML for an interactive Cytoscape.js network graph."""
+    elements_json = json.dumps(elements)
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+      <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+          background-color: #0e1117;
+          color: #c9d1d9;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+          overflow: hidden;
+        }}
+        #cy {{
+          width: 100vw;
+          height: 520px;
+          display: block;
+        }}
+        #overlay {{
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          background: rgba(22, 27, 34, 0.9);
+          backdrop-filter: blur(8px);
+          border: 1px solid rgba(48, 54, 61, 0.9);
+          border-radius: 8px;
+          padding: 10px 14px;
+          font-size: 13px;
+          max-width: 420px;
+          pointer-events: none;
+          z-index: 100;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+        }}
+        .legend {{
+          position: absolute;
+          bottom: 12px;
+          right: 12px;
+          background: rgba(22, 27, 34, 0.9);
+          border: 1px solid rgba(48, 54, 61, 0.9);
+          border-radius: 8px;
+          padding: 8px 14px;
+          font-size: 12px;
+          z-index: 100;
+          display: flex;
+          gap: 14px;
+        }}
+        .dot {{
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          display: inline-block;
+          margin-right: 5px;
+        }}
+      </style>
+    </head>
+    <body>
+      <div id="overlay">
+        <strong id="node-title">🗺️ Interactive Cytoscape Knowledge Graph</strong>
+        <div id="node-detail" style="color: #8b949e; margin-top: 4px; font-size: 12px; line-height: 1.4;">
+          Scroll to zoom • Drag nodes freely • Click any node to inspect exports & imports
+        </div>
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:#2ea44f;"></span>Entrypoint</span>
+        <span><span class="dot" style="background:#1f6feb;"></span>Module</span>
+        <span><span class="dot" style="background:#d29922;"></span>Config / Manifest</span>
+      </div>
+      <div id="cy"></div>
+      <script>
+        var elements = {elements_json};
+        var cy = cytoscape({{
+          container: document.getElementById('cy'),
+          elements: elements,
+          style: [
+            {{
+              selector: 'node',
+              style: {{
+                'label': 'data(label)',
+                'color': '#f0f6fc',
+                'font-size': '11px',
+                'text-valign': 'bottom',
+                'text-margin-y': 5,
+                'background-color': '#1f6feb',
+                'border-width': 2,
+                'border-color': '#388bfd',
+                'width': 28,
+                'height': 28
+              }}
+            }},
+            {{
+              selector: 'node[type = "entrypoint"]',
+              style: {{
+                'background-color': '#2ea44f',
+                'border-color': '#3fb950',
+                'shape': 'diamond',
+                'width': 36,
+                'height': 36
+              }}
+            }},
+            {{
+              selector: 'node[type = "config"]',
+              style: {{
+                'background-color': '#d29922',
+                'border-color': '#e3b341',
+                'shape': 'hexagon',
+                'width': 26,
+                'height': 26
+              }}
+            }},
+            {{
+              selector: 'edge',
+              style: {{
+                'width': 1.8,
+                'line-color': '#30363d',
+                'target-arrow-color': '#388bfd',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier',
+                'opacity': 0.75
+              }}
+            }},
+            {{
+              selector: 'node:selected',
+              style: {{
+                'border-width': 4,
+                'border-color': '#ff7b72',
+                'background-color': '#f85149'
+              }}
+            }}
+          ],
+          layout: {{
+            name: '{layout_name}',
+            animate: true,
+            animationDuration: 700,
+            padding: 30
+          }}
+        }});
+
+        cy.on('tap', 'node', function(evt){{
+          var n = evt.target;
+          document.getElementById('node-title').innerHTML = '📄 ' + n.data('label') + ' (' + n.data('language') + ')';
+          document.getElementById('node-detail').innerHTML = 
+            '<b>Path:</b> ' + n.data('path') + '<br/>' +
+            '<b>Type:</b> ' + n.data('type') + '<br/>' +
+            '<b>Exports:</b> ' + n.data('exports') + '<br/>' +
+            '<b>Imports:</b> ' + n.data('imports');
+        }});
+
+        cy.on('tap', function(evt){{
+          if(evt.target === cy){{
+            document.getElementById('node-title').innerHTML = '🗺️ Interactive Cytoscape Knowledge Graph';
+            document.getElementById('node-detail').innerHTML = 'Scroll to zoom • Drag nodes freely • Click any node to inspect exports & imports';
+          }}
+        }});
+      </script>
+    </body>
+    </html>
+    """
+
 
 st.set_page_config(
     page_title="Digital Archaeologist | Codebase Excavator",
@@ -80,26 +245,19 @@ def init_session_state() -> None:
 
 init_session_state()
 
+# --- Load Secrets from Environment ---
+gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+github_token = os.getenv("GITHUB_TOKEN", "").strip() or None
+
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.title("⚙️ Archaeologist Config")
+    st.title("⛏️ Digital Archaeologist")
     
-    st.markdown("### 🔑 API Keys")
-    env_gemini_key = os.getenv("GEMINI_API_KEY", "")
-    api_key_input = st.text_input(
-        "Google Gemini API Key",
-        value=env_gemini_key if not env_gemini_key.startswith("your_") else "",
-        type="password",
-        help="Required for AI architectural synthesis. Get one at https://aistudio.google.com/.",
-    )
-
-    env_github_token = os.getenv("GITHUB_TOKEN", "")
-    github_token_input = st.text_input(
-        "GitHub Token (Optional)",
-        value=env_github_token,
-        type="password",
-        help="Optional personal access token to lift GitHub rate limits from 60 to 5,000 requests/hour.",
-    )
+    # Environment Status
+    if gemini_key and not gemini_key.startswith("your_"):
+        st.success("🟢 Gemma API Key Loaded (.env)")
+    else:
+        st.warning("⚠️ Add `GEMINI_API_KEY` to your `.env` file")
 
     st.markdown("### 💎 Gemma Track (Hackathon)")
     default_model = os.getenv("GEMMA_MODEL", "gemma-4-26b-a4b-it")
@@ -170,15 +328,15 @@ if excavate_clicked:
 
                 # 2. Fetch Metadata & Tree
                 status.write(f"2️⃣ Fetching repository metadata & Git tree for `{owner}/{repo}`...")
-                repo_info = github_service.get_repository_overview(owner, repo, token=github_token_input)
+                repo_info = github_service.get_repository_overview(owner, repo, token=github_token)
                 tree_entries = repo_info.get("tree_entries", [])
 
                 # 3. Fetch README & Key Files
                 status.write("3️⃣ Fetching README and inspecting entry points & dependency manifests...")
                 default_branch = repo_info.get("default_branch", "main")
-                readme_text = github_service.get_readme(owner, repo, default_branch, token=github_token_input)
+                readme_text = github_service.get_readme(owner, repo, default_branch, token=github_token)
                 key_files = github_service.get_key_source_files(
-                    owner, repo, tree_entries, default_branch=default_branch, max_files=15, token=github_token_input
+                    owner, repo, tree_entries, default_branch=default_branch, max_files=15, token=github_token
                 )
 
                 # 4. Build Knowledge Graph
@@ -195,7 +353,7 @@ if excavate_clicked:
                     repo_info=repo_info,
                     readme_text=readme_text,
                     graph_data=graph_data,
-                    api_key=api_key_input,
+                    api_key=gemini_key,
                     model=selected_model,
                 )
 
@@ -245,18 +403,34 @@ if res:
     # Token Economics Metric Cards
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.metric("Raw Codebase (Est. Tokens)", f"{token_stats.get('raw_codebase_tokens', 0):,}")
+        st.metric(
+            "Raw Codebase (Est. Tokens)",
+            f"{token_stats.get('raw_codebase_tokens', 0):,}",
+            help="Exact sum of all source file sizes retrieved from the GitHub Git Tree API, divided by ~4 bytes/token (standard BPE tokenization).",
+        )
     with m2:
-        st.metric("Knowledge Graph (Tokens)", f"{token_stats.get('knowledge_graph_tokens', 0):,}")
+        st.metric(
+            "Knowledge Graph (Tokens)",
+            f"{token_stats.get('knowledge_graph_tokens', 0):,}",
+            help="Token size of the serialized Knowledge Graph JSON payload (nodes, symbol exports, and dependency edges) divided by ~4 bytes/token.",
+        )
     with m3:
-        st.metric("Context Token Reduction", token_stats.get("token_reduction_percent", "N/A"))
+        st.metric(
+            "Context Token Reduction",
+            token_stats.get("token_reduction_percent", "N/A"),
+            help="Mathematical percentage of context saved: (1 - (Graph Tokens / Raw Tokens)) * 100.",
+        )
     with m4:
-        st.metric("Graph Nodes & Edges", f"{len(graph_data['nodes'])} / {len(graph_data['edges'])}")
+        st.metric(
+            "Graph Nodes & Edges",
+            f"{len(graph_data['nodes'])} / {len(graph_data['edges'])}",
+            help="Nodes represent identified source code modules/entry points; edges represent verified import/dependency linkages.",
+        )
 
     st.info(
-        "💡 **Why This Matters**: Feeding the entire raw codebase into an LLM burns tens of thousands of tokens, "
-        "causes context degradation, and triggers API rate limits. Our **Knowledge Graph** delivers the same structural "
-        "comprehension using a fraction of the token budget."
+        f"💡 **Token Economics Math**: The raw codebase totals **{token_stats.get('raw_codebase_bytes', 0):,} bytes** across {len(graph_data['nodes'])} files. "
+        f"At standard BPE tokenization (~4 bytes/token), feeding this entire project raw would cost **~{token_stats.get('raw_codebase_tokens', 0):,} tokens**. "
+        f"Our compact topological Knowledge Graph packs the full architectural context into only **~{token_stats.get('knowledge_graph_tokens', 0):,} tokens** — a **{token_stats.get('token_reduction_percent', '90%')} reduction**!"
     )
 
     # Content Tabs
@@ -269,19 +443,54 @@ if res:
 
     with tab_summary:
         st.markdown("### 🏛️ Executive Codebase Summary & Resurrection Guide")
+        
+        # Download button for the markdown summary
+        st.download_button(
+            label="⬇️ Download Archaeological Summary (ARCHAEOLOGY_REPORT.md)",
+            data=ai_summary,
+            file_name=f"{repo}_ARCHAEOLOGY_REPORT.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+        st.write("")
         st.markdown(ai_summary)
+        
+        with st.expander("📋 View / Copy Raw Markdown Content"):
+            st.code(ai_summary, language="markdown")
 
     with tab_graph:
-        st.markdown("### 🗺️ Module Dependency Topology")
-        st.caption("Visual representation of modules, entry points (green), and detected import relations.")
 
-        # Mermaid Graph View
-        mermaid_code = graph_data.get("mermaid_diagram", "")
-        if mermaid_code:
-            st.markdown(f"```mermaid\n{mermaid_code}\n```")
+        
+        st.markdown("### 🗺️ Interactive Cytoscape.js Knowledge Graph")
+        st.caption("Physics-directed interactive topology. Drag nodes, scroll to zoom, and tap any node to inspect exports & imports.")
 
-        # Tabular Nodes Explorer
-        with st.expander("📋 Explore Detected Modules & Symbol Exports", expanded=False):
+        graph_col1, graph_col2 = st.columns([3, 1])
+        with graph_col2:
+            layout_choice = st.selectbox(
+                "Graph Layout Engine",
+                options=["cose", "concentric", "circle", "breadthfirst", "grid"],
+                index=0,
+                help="Choose physics simulation (cose), concentric, or circular layout",
+            )
+        with graph_col1:
+            st.markdown(f"**Visualizing top {len(graph_data.get('cytoscape_elements', []))} elements** with interactive physics simulation.")
+
+        # Render Interactive Cytoscape Graph
+        cy_elements = graph_data.get("cytoscape_elements", [])
+        if cy_elements:
+            cy_html = render_cytoscape_html(cy_elements, layout_name=layout_choice)
+            components.html(cy_html, height=540)
+        else:
+            st.info("No source files found to construct network graph.")
+
+        # Secondary static views in expander
+        with st.expander("📐 Alternative Views (Mermaid Diagram & Node Table)", expanded=False):
+            mermaid_code = graph_data.get("mermaid_diagram", "")
+            if mermaid_code:
+                st.markdown("**Static Mermaid Diagram:**")
+                st.markdown(f"```mermaid\n{mermaid_code}\n```")
+
+            st.markdown("**Detailed Node Explorer:**")
             node_table = []
             for n in graph_data["nodes"]:
                 node_table.append({
@@ -293,6 +502,7 @@ if res:
                     "Imports": ", ".join(n["imports"]) if n["imports"] else "(none)",
                 })
             st.dataframe(node_table, use_container_width=True)
+
 
     with tab_prompt:
         st.markdown("### 🤖 Copy-Paste Context Payload for AI Coding Agents")
