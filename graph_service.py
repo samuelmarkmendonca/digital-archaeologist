@@ -7,6 +7,7 @@ with robust multi-language import resolution, dependency mapping, and undocument
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Any
@@ -215,9 +216,10 @@ def build_knowledge_graph(
     """
     relevant_files = [e["path"] for e in tree_entries if e.get("type") == "blob" and is_relevant_file(e.get("path", ""))]
 
-    all_nodes: list[dict[str, Any]] = []
-    node_by_id: dict[str, dict[str, Any]] = {}
-    total_raw_chars = 0
+    # Map file paths to exact byte sizes provided by GitHub's Git Tree API
+    file_sizes = {e["path"]: e.get("size", 0) for e in tree_entries if e.get("type") == "blob"}
+
+    total_raw_bytes = 0
 
     for path in relevant_files:
         filename = os.path.basename(path)
@@ -226,7 +228,9 @@ def build_knowledge_graph(
         is_entry = filename in ENTRY_POINT_NAMES or path.lower() in ("main.py", "app.py", "src/index.js", "src/main.rs", "src/requests/__init__.py")
         
         content = file_contents.get(path, "")
-        total_raw_chars += len(content) if content else 1800
+        # Use exact GitHub blob byte size if available, fallback to content length
+        file_bytes = file_sizes.get(path, 0)
+        total_raw_bytes += file_bytes if file_bytes > 0 else (len(content) if content else 1500)
 
         imports, symbols = parse_imports_and_symbols(content, ext)
         undocumented = detect_undocumented_behaviors(content, filename, ext)
@@ -250,9 +254,7 @@ def build_knowledge_graph(
             "language": language,
             "exports": symbols,
             "imports": imports,
-            "undocumented_behaviors": undocumented,
-            "is_entrypoint": is_entry,
-            "has_content": bool(content),
+            "size_bytes": file_bytes,
         }
         all_nodes.append(node)
         node_by_id[path] = node
@@ -337,6 +339,9 @@ def build_knowledge_graph(
         display_nodes.sort(key=lambda n: (n["is_entrypoint"], node_degrees.get(n["id"], 0), n["has_content"]), reverse=True)
         display_nodes = display_nodes[:45]
 
+    # Generate visual Mermaid graph representation
+    mermaid_lines = ["graph TD"]
+    display_nodes = nodes[:25]
     display_ids = {n["id"] for n in display_nodes}
     active_edges = [e for e in edges if e["source"] in display_ids and e["target"] in display_ids]
 
@@ -392,14 +397,18 @@ def build_knowledge_graph(
         "elements": cytoscape_elements_dict,
     }
 
-    # Estimate token economics
-    raw_tokens_estimate = max(1200, total_raw_chars // 4)
-    graph_chars = len(str(cyto_nodes)) + len(str(cyto_edges))
-    graph_tokens_estimate = max(450, graph_chars // 4)
+    # Standard LLM BPE tokenization metric (~4 bytes/chars per token in code)
+    raw_tokens_estimate = max(1000, total_raw_bytes // 4)
+    # The Knowledge Graph is serialized into dense JSON
+    graph_chars = len(json.dumps(nodes)) + len(json.dumps(edges))
+    graph_tokens_estimate = max(400, graph_chars // 4)
     savings_pct = max(0.0, round((1.0 - (graph_tokens_estimate / raw_tokens_estimate)) * 100, 1))
     savings_factor = round(raw_tokens_estimate / max(1, graph_tokens_estimate), 1)
 
     total_quirks = sum(len(n["undocumented_behaviors"]) for n in display_nodes)
+
+    # Format Cytoscape.js elements
+    cytoscape_elements = generate_cytoscape_elements(nodes, edges)
 
     return {
         "repository": repo_name,
@@ -409,14 +418,51 @@ def build_knowledge_graph(
             "entry_points_detected": sum(1 for n in display_nodes if n["is_entrypoint"]),
             "undocumented_quirks_detected": total_quirks,
         },
-        "cytoscape_json": cytoscape_json,
-        "cytoscape_elements": cytoscape_elements_flat,
-        "nodes": display_nodes,
-        "edges": active_edges,
+        "nodes": nodes,
+        "edges": edges,
+        "mermaid_diagram": mermaid_diagram,
+        "cytoscape_elements": cytoscape_elements,
         "token_stats": {
+            "raw_codebase_bytes": total_raw_bytes,
             "raw_codebase_tokens": raw_tokens_estimate,
             "knowledge_graph_tokens": graph_tokens_estimate,
             "token_reduction_percent": f"{savings_pct}%",
-            "savings_factor": f"{savings_factor}x",
+            "methodology": "Based on GitHub Git Tree blob byte sizes and BPE tokenization (~4 bytes/chars per token).",
         },
     }
+
+
+def generate_cytoscape_elements(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], max_nodes: int = 40) -> list[dict[str, Any]]:
+    """Format nodes and edges into the Cytoscape.js data schema for interactive visualization."""
+    elements: list[dict[str, Any]] = []
+
+    # Prioritize entrypoints first, up to max_nodes to keep visualization smooth
+    selected_nodes = sorted(nodes, key=lambda n: (0 if n["type"] == "entrypoint" else 1))[:max_nodes]
+    selected_ids = {n["id"] for n in selected_nodes}
+
+    for n in selected_nodes:
+        elements.append({
+            "data": {
+                "id": n["id"],
+                "label": n["filename"],
+                "path": n["path"],
+                "type": n["type"],
+                "language": n["language"],
+                "exports": ", ".join(n["exports"][:4]) if n["exports"] else "None",
+                "imports": ", ".join(n["imports"][:4]) if n["imports"] else "None",
+            }
+        })
+
+    for e in edges:
+        if e["source"] in selected_ids and e["target"] in selected_ids:
+            elements.append({
+                "data": {
+                    "id": f"{e['source']}->{e['target']}",
+                    "source": e["source"],
+                    "target": e["target"],
+                    "relation": e.get("relation", "imports"),
+                }
+            })
+
+    return elements
+

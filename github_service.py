@@ -7,7 +7,6 @@ issue fetching, and raw file content retrieval via the GitHub REST API v3.
 from __future__ import annotations
 
 import base64
-import io
 import os
 import re
 import urllib.parse
@@ -26,13 +25,17 @@ _ZIP_CACHE: dict[tuple[str, str], dict[str, str]] = {}
 
 def _get_headers(token: str | None = None) -> dict[str, str]:
     """Build standard headers for GitHub REST API requests."""
+    tok = token or os.getenv("GITHUB_TOKEN")
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "User-Agent": DEFAULT_USER_AGENT,
     }
-    if token and token.strip():
-        headers["Authorization"] = f"Bearer {token.strip()}"
+    if tok:
+        clean_tok = tok.strip().strip('"').strip("'").strip()
+        if clean_tok:
+            headers["Authorization"] = f"token {clean_tok}"
     return headers
+
 
 
 def parse_repo_url(repo_url: str) -> tuple[str, str]:

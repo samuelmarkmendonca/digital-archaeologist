@@ -116,11 +116,11 @@ Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Add your Google Gemini / Gemma API key:
-```env
-GEMINI_API_KEY="your_google_ai_studio_key"
-GEMMA_MODEL="gemma-4-26b-a4b-it"
-GITHUB_TOKEN=""  # Optional: increases GitHub API rate limit
+
+Set your Gemini API key in `.env`:
+
+```ini
+GEMINI_API_KEY="your-gemma-api-key-here"
 ```
 *(Note: Digital Archaeologist is fully functional in deterministic mode even without an API key!)*
 
